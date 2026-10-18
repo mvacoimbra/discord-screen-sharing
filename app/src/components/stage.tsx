@@ -95,6 +95,7 @@ export function Stage({
             connectionQuality={room.quality[onStage.slot]}
             poppedOut={poppedOut === onStage.slot}
             onMenu={(x, y) => onMenu(onStage.slot, onStage.userId, x, y)}
+            zoomable
             className={`h-full w-full ${fullscreen ? "rounded-none border-0" : ""}`}
           />
         </div>

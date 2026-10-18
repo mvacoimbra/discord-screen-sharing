@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 
 import { Avatar } from "./avatar";
 import type { RoomConnection } from "@/lib/room";
+import { MAX_ZOOM, MIN_ZOOM, useZoom } from "@/lib/zoom";
 import type { Person } from "@/lib/types";
 
 /**
@@ -32,6 +33,7 @@ export function Screen({
   connectionQuality,
   poppedOut = false,
   compact = false,
+  zoomable = false,
   onWatch,
   onStop,
   onMenu,
@@ -56,6 +58,9 @@ export function Screen({
   /** Na faixa de miniaturas o tile tem 186×104 — avatar e botão em tamanho
    *  cheio não cabem e atropelam o nome. */
   compact?: boolean;
+  /** Só a tela grande do palco amplia: na grade o duplo clique já é "pôr no
+   *  palco", e numa miniatura não há o que ver de perto. */
+  zoomable?: boolean;
   onWatch: () => void;
   onStop: () => void;
   /** Botão direito no tile: abre o menu de contexto (RF-AST-8). */
@@ -63,6 +68,10 @@ export function Screen({
   className?: string;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  const zoomArea = useRef<HTMLDivElement>(null);
+  const canZoom = zoomable && watching && drawing && !poppedOut;
+  const { zoom, zoomIn, zoomOut, reset } = useZoom(zoomArea, canZoom, slot);
+  const zoomed = zoom.scale > 1;
 
   useEffect(() => {
     if (!watching) return;
@@ -145,10 +154,65 @@ export function Screen({
           {/* Invisível até o primeiro quadro: o canvas nasce em 300×150 e
               pintado de preto, e esse retângulo no meio do tile parece defeito
               — justamente durante a espera que RF-AST-5 quer explicar. */}
+          {/* A área que escuta roda e arraste não se move; quem amplia é o nó
+              de dentro. Medir no nó transformado daria o retângulo já
+              ampliado, e o zoom fugiria do cursor. */}
           <div
-            ref={box}
-            className={`relative grid h-full w-full min-h-0 place-items-center ${drawing ? "" : "invisible"}`}
-          />
+            ref={zoomArea}
+            className={
+              "relative h-full w-full min-h-0 overflow-hidden " +
+              (canZoom ? "touch-none " : "") +
+              (canZoom && zoomed ? "cursor-grab active:cursor-grabbing" : "")
+            }
+          >
+            <div
+              ref={box}
+              style={
+                zoomed
+                  ? {
+                      transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})`,
+                      transformOrigin: "0 0",
+                    }
+                  : undefined
+              }
+              className={`relative grid h-full w-full min-h-0 place-items-center ${drawing ? "" : "invisible"}`}
+            />
+          </div>
+          {canZoom ? (
+            <div
+              role="group"
+              aria-label="Zoom da tela"
+              className="absolute right-2 bottom-2 z-10 flex items-center gap-0.5 rounded-full bg-black/65 p-0.5 text-texto backdrop-blur-[8px]"
+            >
+              <button
+                type="button"
+                onClick={zoomOut}
+                disabled={zoom.scale <= MIN_ZOOM}
+                aria-label="Diminuir zoom"
+                className="grid size-7 place-items-center rounded-full text-[16px]/none hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                onClick={reset}
+                title="Voltar ao tamanho original (ou duplo clique na tela)"
+                aria-label={`Zoom em ${Math.round(zoom.scale * 100)}%. Voltar ao tamanho original`}
+                className="h-7 min-w-12 rounded-full px-1.5 text-[12px] font-semibold tabular-nums hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto"
+              >
+                {Math.round(zoom.scale * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={zoomIn}
+                disabled={zoom.scale >= MAX_ZOOM}
+                aria-label="Aumentar zoom"
+                className="grid size-7 place-items-center rounded-full text-[16px]/none hover:bg-white/15 disabled:opacity-40 disabled:hover:bg-transparent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-texto"
+              >
+                +
+              </button>
+            </div>
+          ) : null}
           {/* Entre pedir para assistir e o primeiro quadro cabe um keyframe
               inteiro de espera, e um tile parado é indistinguível de um
               travamento (RF-AST-5). O giro para com prefers-reduced-motion. */}
