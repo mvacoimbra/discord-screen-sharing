@@ -21,7 +21,10 @@ services:
       NEXT_TELEMETRY_DISABLED: 1
       # O Docker no Windows não avisa o contêiner quando um arquivo muda.
       WATCHPACK_POLLING: "true"
-      NEXT_POLL_INTERVAL_MS: "1000"
+      # O Turbopack (padrão no Next 16) não recebe eventos de arquivo do Docker no Windows e o
+      # polling dele não pegou mudanças num teste; aqui o dev roda no webpack, que respeita o
+      # WATCHPACK_POLLING. IS_WEBPACK_TEST é a variável que o Next lê para isso, sem mexer em script.
+      IS_WEBPACK_TEST: "1"
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - .:/app
