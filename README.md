@@ -53,6 +53,19 @@ normalmente, só não abre como atividade. Para gerar o `SESSION_SECRET`:
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
+### Com o Hangar
+
+Para rodar no PC emprestado em vez desta máquina:
+
+```bash
+hangar up     # sobe o docker-compose.dev.yml lá e traz a porta 3000 pra cá
+hangar down   # derruba
+```
+
+Abre do mesmo jeito em <http://localhost:3000>. O Next recarrega sozinho; o
+servidor de tempo real usa o `--watch` do Node, que não vê mudança de arquivo
+num Docker do Windows, então mexeu em `server/`, rode `hangar up` de novo.
+
 ---
 
 ## A forma do repositório
