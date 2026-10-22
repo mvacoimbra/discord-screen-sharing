@@ -31,11 +31,6 @@ function origemDeDesenvolvimento(): string[] {
 const nextConfig: NextConfig = {
   allowedDevOrigins: origemDeDesenvolvimento(),
 
-  // O Turbopack ignora o WATCHPACK_POLLING; o docker-compose.dev.yml define
-  // NEXT_POLL_INTERVAL_MS para o contêiner do Hangar (Docker no Windows, sem
-  // eventos de arquivo) observar por polling.
-  watchOptions: { pollIntervalMs: Number(process.env.NEXT_POLL_INTERVAL_MS) || undefined },
-
   // O Next escreve AGENTS.md e CLAUDE.md na pasta do app por conta própria.
   // Este repositório mantém os seus na raiz, onde valem para os dois
   // workspaces; um arquivo gerado a cada build entrando no git é ruído.
