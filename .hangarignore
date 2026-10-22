@@ -1,0 +1,6 @@
+.cache
+screenshots-discord
+test-results
+playwright-report
+coverage
+.agent-browser
