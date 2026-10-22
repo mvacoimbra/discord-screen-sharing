@@ -21,6 +21,7 @@ services:
       NEXT_TELEMETRY_DISABLED: 1
       # O Docker no Windows não avisa o contêiner quando um arquivo muda.
       WATCHPACK_POLLING: "true"
+      NEXT_POLL_INTERVAL_MS: "1000"
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - .:/app
