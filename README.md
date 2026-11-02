@@ -311,30 +311,6 @@ docker compose down             # derruba tudo
 
 ---
 
-## Deploy em produção (Coolify)
-
-A VPS **não builda**: só baixa a imagem e sobe. Quem builda é o workflow
-[`deploy.yml`](.github/workflows/deploy.yml), num runner do Hangar:
-
-1. a cada push na `main`: `npm run types` e `npm run lint`;
-2. `docker build` e push de `ghcr.io/mvacoimbra/discord-screen-sharing-sala:<sha completo>`
-   (GHCR privado, `GITHUB_TOKEN`), mantendo só as 5 imagens mais recentes;
-3. só depois do push: `PATCH /applications/<uuid>` com
-   `docker_registry_image_name` e `docker_registry_image_tag`, e `POST /deploy`.
-
-Configuração do repositório (Settings → Secrets and variables → Actions):
-
-- variáveis `COOLIFY_URL` (`https://app.coolify.io/api/v1`) e `COOLIFY_APP_UUID`;
-- segredo `COOLIFY_TOKEN`;
-- variável `DEPLOY_PAUSED=true` pausa build e deploy (as verificações seguem).
-
-O Dockerfile não recebe valores em tempo de build. Se um dia receber, eles
-entram por `--build-arg` lendo de variáveis do GitHub, nunca escritos no
-workflow. A aplicação no Coolify usa o build pack `dockerimage`, e a VPS
-precisa de `docker login ghcr.io` com um token `read:packages`.
-
----
-
 ## Deixar no ar
 
 O [`Caddyfile`](infra/Caddyfile) já traz o roteamento certo e o certificado
