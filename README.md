@@ -318,13 +318,13 @@ A VPS **não builda**: só baixa a imagem e sobe. Quem builda é o workflow
 
 1. a cada push na `main`: `npm run types` e `npm run lint`;
 2. `docker build` e push de `ghcr.io/mvacoimbra/discord-screen-sharing-sala:<sha completo>`
-   (GHCR privado, `GITHUB_TOKEN`), mantendo só as 5 imagens mais recentes;
+   (GHCR privado, `GITHUB_TOKEN`), mantendo as 5 versões com tag mais recentes (nunca apaga versão sem tag);
 3. só depois do push: `PATCH /applications/<uuid>` com
    `docker_registry_image_name` e `docker_registry_image_tag`, e `POST /deploy`.
 
 Configuração do repositório (Settings → Secrets and variables → Actions):
 
-- variáveis `COOLIFY_URL` (`https://app.coolify.io/api/v1`) e `COOLIFY_APP_UUID`;
+- variáveis `COOLIFY_URL` (`https://app.coolify.io`) e `COOLIFY_APP_UUID`;
 - segredo `COOLIFY_TOKEN`;
 - variável `DEPLOY_PAUSED=true` pausa build e deploy (as verificações seguem).
 

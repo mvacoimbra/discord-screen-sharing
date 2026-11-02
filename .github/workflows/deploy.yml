@@ -2,7 +2,7 @@ name: Build and deploy
 
 # Build roda num runner do Hangar; a VPS só baixa a imagem e sobe.
 # Kill switch: crie a variável de repositório DEPLOY_PAUSED=true para pular
-# build, push e deploy (as verificações continuam rodando).
+# build, deploy e limpeza (as verificações continuam rodando).
 
 on:
   push:
@@ -19,25 +19,28 @@ permissions:
 env:
   IMAGE: ghcr.io/mvacoimbra/discord-screen-sharing-sala
   PACKAGE: discord-screen-sharing-sala
-  KEEP_IMAGES: "5"
 
 jobs:
   check:
     runs-on: [self-hosted, hangar, Linux, X64, docker]
+    timeout-minutes: 20
+    env:
+      # Cache do npm no disco do runner (nada de actions/cache pela internet).
+      npm_config_cache: /opt/hangar-cache/npm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - run: npm ci
       - run: npm run types
       - run: npm run lint
 
-  build-deploy:
+  build:
     needs: check
-    if: vars.DEPLOY_PAUSED != 'true'
+    if: vars.DEPLOY_PAUSED != 'true' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, hangar, Linux, X64, docker]
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -46,59 +49,83 @@ jobs:
 
       - name: Log in to GHCR
         env:
-          GH_ACTOR: ${{ github.actor }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_ACTOR" --password-stdin
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
 
       # Build no Docker local do runner: o cache de camadas fica na máquina.
       # O Dockerfile não tem ARG de build hoje. Se um dia tiver, passe o valor
       # com `--build-arg X="$X"` lendo de `vars.*`, nunca escrito aqui.
-      # O label de origem liga o pacote ao repositório (permite o prune).
-      - name: Build and push image
+      - name: Build and push
         env:
           SHA: ${{ github.sha }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          image="${IMAGE}:${SHA}"
           docker build \
-            --label "org.opencontainers.image.source=https://github.com/$REPO" \
-            --label "org.opencontainers.image.revision=$SHA" \
-            -t "$IMAGE:$SHA" .
-          docker push "$IMAGE:$SHA"
+            --label "org.opencontainers.image.source=https://github.com/${REPO}" \
+            -t "$image" .
+          # O GHCR às vezes responde "denied" com pacote novo e aceita depois.
+          for attempt in 1 2 3 4 5; do
+            docker push "$image" && break
+            [ "$attempt" != 5 ] || { echo "Push still failing" >&2; exit 1; }
+            sleep $((attempt * 15))
+          done
 
+  deploy:
+    needs: build
+    runs-on: [self-hosted, hangar, Linux]
+    timeout-minutes: 5
+    env:
+      COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+      COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+      UUID: ${{ vars.COOLIFY_APP_UUID }}
+      SHA: ${{ github.sha }}
+    steps:
       # Só chega aqui com a imagem já publicada. O Coolify apenas baixa.
       - name: Point Coolify at the new image and deploy
-        env:
-          COOLIFY_URL: ${{ vars.COOLIFY_URL }}
-          COOLIFY_APP_UUID: ${{ vars.COOLIFY_APP_UUID }}
-          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
-          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          api="${COOLIFY_URL:-https://app.coolify.io/api/v1}"
-          auth="Authorization: Bearer ${COOLIFY_TOKEN}"
-          curl -fsS -X PATCH "$api/applications/$COOLIFY_APP_UUID" \
-            -H "$auth" -H "Content-Type: application/json" \
-            -d "$(jq -n --arg n "$IMAGE" --arg t "$SHA" \
-              '{docker_registry_image_name:$n, docker_registry_image_tag:$t}')" \
-            -o /dev/null
-          curl -fsS -X POST "$api/deploy" \
-            -H "$auth" -H "Content-Type: application/json" \
-            -d "$(jq -n --arg u "$COOLIFY_APP_UUID" '{uuid:$u, force:false}')" \
-            -o /dev/null
-          echo "Deploy requested for $IMAGE:$SHA"
+          api="${COOLIFY_URL:-https://app.coolify.io}/api/v1"
+          auth=(-H "Authorization: Bearer ${COOLIFY_TOKEN}" -H "Accept: application/json" -H "Content-Type: application/json")
+          body=$(jq -nc --arg n "$IMAGE" --arg t "$SHA" '{docker_registry_image_name: $n, docker_registry_image_tag: $t}')
+          curl -fsS --max-time 30 -X PATCH "${auth[@]}" -d "$body" "${api}/applications/${UUID}" > /dev/null
+          response=$(curl -fsS --max-time 30 -X POST "${auth[@]}" -d "$(jq -nc --arg u "$UUID" '{uuid: $u, force: false}')" "${api}/deploy")
+          echo "$response" | jq -e '.deployments[0].deployment_uuid' > /dev/null
+          echo "Deploy requested for ${IMAGE}:${SHA}"
 
-      - name: Prune old images
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          set -euo pipefail
-          gh api --paginate "/users/$OWNER/packages/container/$PACKAGE/versions?per_page=100" |
-            jq -r -s --argjson keep "$KEEP_IMAGES" \
-              'add | sort_by(.created_at) | reverse | .[$keep:] | .[].id' |
-            while read -r id; do
-              echo "Deleting version $id"
-              gh api -X DELETE "/users/$OWNER/packages/container/$PACKAGE/versions/$id"
-            done
+  prune:
+    name: Prune old images
+    needs: deploy
+    if: always() && needs.deploy.result == 'success'
+    runs-on: [self-hosted, hangar, Linux]
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+      packages: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OWNER: ${{ github.repository_owner }}
+      KEEP: "5"
+    steps:
+      - run: |
+          set -uo pipefail
+          owner=$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')
+          # Versões vêm da mais nova para a mais velha. Só apaga versão COM tag
+          # além das KEEP últimas. Nunca apague versão sem tag: a imagem é um
+          # índice e as partes internas aparecem sem tag; apagá-las deixa a tag
+          # vazia e a VPS falha com "manifest unknown".
+          ids=$(gh api --paginate "users/${owner}/packages/container/${PACKAGE}/versions?per_page=100" \
+            --jq '.[] | [.id, ((.metadata.container.tags // []) | join(","))] | @tsv' 2>/dev/null || true)
+          [ -n "$ids" ] || exit 0
+          kept=0
+          while IFS=$'\t' read -r id tags; do
+            [ -n "$tags" ] || continue
+            kept=$((kept + 1))
+            [ "$kept" -gt "$KEEP" ] || continue
+            echo "Deleting version ${id} (${tags})"
+            gh api -X DELETE "users/${owner}/packages/container/${PACKAGE}/versions/${id}" > /dev/null 2>&1 \
+              || echo "Could not delete ${id}" >&2
+          done <<< "$ids"
